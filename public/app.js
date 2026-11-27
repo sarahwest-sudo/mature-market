@@ -65,7 +65,20 @@ function toast(msg, err) { const t = $('#toast'); t.textContent = msg; t.classNa
 // Live updates come through the stream. Some school networks block or hold back streams, so if
 // nothing has arrived for a few seconds the page falls back to asking for the state every 2 seconds.
 let lastMsg = 0, pollT = null, polling = false;
-function applyState(g) { S.game = g; S.offset = S.game.serverNow - Date.now(); render(); }
+// A live update must not rebuild the page while a dropdown is open or the mouse is held down
+// (that closes the dropdown / swallows the click). Hold it back and redraw once the user is done.
+let pendingRender = false, pointerDown = false, selectOpenUntil = 0;
+const busy = () => pointerDown || Date.now() < selectOpenUntil;
+const isSel = (e) => e.target && e.target.tagName === 'SELECT';
+document.addEventListener('focusin', (e) => { if (isSel(e)) selectOpenUntil = Date.now() + 15000; });
+document.addEventListener('mousedown', (e) => { if (isSel(e)) selectOpenUntil = Date.now() + 15000; }, true);
+document.addEventListener('change', (e) => { if (isSel(e)) { selectOpenUntil = 0; setTimeout(flushRender, 0); } }, true);
+function applyState(g) { S.game = g; S.offset = S.game.serverNow - Date.now(); if (busy()) pendingRender = true; else render(); }
+function flushRender() { if (pendingRender && !busy()) { pendingRender = false; render(); } }
+document.addEventListener('pointerdown', () => { pointerDown = true; }, true);
+document.addEventListener('pointerup', () => { pointerDown = false; setTimeout(flushRender, 300); }, true);
+document.addEventListener('focusout', (e) => { if (isSel(e)) selectOpenUntil = 0; setTimeout(flushRender, 300); });
+setInterval(flushRender, 1000);
 async function refresh() {
   if (!S.code || polling) return; polling = true;
   try {
@@ -127,6 +140,7 @@ function eventCard(id, big) {
 function lastRow(p) { return p.history.length ? p.history[p.history.length - 1] : { share: 0, revenue: p.revenue, profit: p.profit, cash: p.cash, debt: p.debt, staff: p.staff, turnover: p.turnover, absent: p.absent, productivity: p.productivity, sat: p.sat, cpe: p.cpe }; }
 
 // ---------- render ----------
+let lastHTML = '';
 function render() {
   if (S.dragging || !S.meta) return;
   const a = document.activeElement; const fid = a && a.id; let selr = null;
@@ -136,6 +150,9 @@ function render() {
   else if (S.role === 'player' && S.game) html = me() ? playerView() : joinView();
   else if (S.role === 'teacher') html = teacherLogin();
   else html = landing();
+  pendingRender = false;
+  if (html === lastHTML) return; // nothing changed: leave the page (and any open dropdown) alone
+  lastHTML = html;
   $('#app').innerHTML = html;
   tick();
   if (fid) { const el = document.getElementById(fid); if (el) { el.focus(); if (selr && el.setSelectionRange) { try { el.setSelectionRange(selr[0], selr[1]); } catch (e) { /* ignore */ } } } }
