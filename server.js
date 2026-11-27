@@ -268,12 +268,19 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/api/stream') {
     let g; try { g = getGame(url.searchParams.get('code')); } catch (e) { res.writeHead(404); return res.end(); }
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
-    res.write('retry: 2000\n\n');
+    // 2 KB padding so school web filters and proxies that buffer small chunks pass the stream through
+    res.write(':' + ' '.repeat(2048) + '\n\nretry: 2000\n\n');
     if (!streams.has(g.code)) streams.set(g.code, new Set());
     streams.get(g.code).add(res);
     res.write(`data: ${JSON.stringify(G.publicState(g, { claude: claudeOn() }))}\n\n`);
     req.on('close', () => streams.get(g.code).delete(res));
     return;
+  }
+  if (url.pathname === '/api/state') {
+    // Plain JSON copy of the game state: used when the live stream is blocked (e.g. school web filters)
+    let g; try { g = getGame(url.searchParams.get('code')); } catch (e) { res.writeHead(404, { 'Content-Type': 'application/json' }); return res.end('{"error":"No game with that code."}'); }
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    return res.end(JSON.stringify(G.publicState(g, { claude: claudeOn() })));
   }
   if (url.pathname === '/api/meta') {
     res.writeHead(200, { 'Content-Type': 'application/json' });

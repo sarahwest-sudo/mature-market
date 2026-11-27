@@ -55,18 +55,37 @@ async function api(cmd, body = {}) {
   const r = await fetch('/api/' + cmd, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(Object.assign({ code: S.code, pid: S.pid, pin: S.pin }, body)) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || 'Something went wrong.');
+  if (S.code && Date.now() - lastMsg > 5000 && cmd !== 'check') setTimeout(refresh, 100);
   return j;
 }
 async function run(cmd, body) { try { const j = await api(cmd, body); if (j.note) toast(j.note); return j; } catch (e) { toast(e.message, true); return null; } }
 let toastT;
 function toast(msg, err) { const t = $('#toast'); t.textContent = msg; t.className = 'show' + (err ? ' err' : ''); clearTimeout(toastT); toastT = setTimeout(() => { t.className = ''; }, 3500); }
 
+// Live updates come through the stream. Some school networks block or hold back streams, so if
+// nothing has arrived for a few seconds the page falls back to asking for the state every 2 seconds.
+let lastMsg = 0, pollT = null, polling = false;
+function applyState(g) { S.game = g; S.offset = S.game.serverNow - Date.now(); render(); }
+async function refresh() {
+  if (!S.code || polling) return; polling = true;
+  try {
+    const r = await fetch('/api/state?code=' + encodeURIComponent(S.code), { cache: 'no-store' });
+    if (r.ok) { const g = await r.json(); if (g && g.code === S.code) applyState(g); }
+  } catch (e) { /* network hiccup: try again next tick */ } finally { polling = false; }
+}
 function connect() {
   if (S.es) S.es.close();
-  S.es = new EventSource('/api/stream?code=' + encodeURIComponent(S.code));
-  S.es.onmessage = (e) => { S.game = JSON.parse(e.data); S.offset = S.game.serverNow - Date.now(); render(); };
-  S.es.onerror = () => { if (S.es.readyState === 2) { toast('Lost the game. It may have ended.', true); } };
+  clearInterval(pollT); lastMsg = 0;
+  const code = S.code;
+  refresh();
+  try {
+    S.es = new EventSource('/api/stream?code=' + encodeURIComponent(code));
+    S.es.onmessage = (e) => { lastMsg = Date.now(); applyState(JSON.parse(e.data)); };
+    S.es.onerror = () => { /* the poll below keeps the page up to date */ };
+  } catch (e) { S.es = null; }
+  pollT = setInterval(() => { if (S.code !== code) return clearInterval(pollT); if (Date.now() - lastMsg > 5000) refresh(); }, 2000);
 }
+function disconnect() { if (S.es) S.es.close(); S.es = null; clearInterval(pollT); }
 
 // ---------- ui helpers ----------
 const v = (k, d = '') => (S.ui[k] !== undefined ? S.ui[k] : d);
@@ -473,7 +492,7 @@ const ACT = {
   async goJoin() { const code = String(v('joincode')).trim().toUpperCase(); if (!code) return toast('Type the game code.', true); try { await api('check', { code }); } catch (e) { return toast(e.message, true); } S.role = 'player'; S.code = code; S.pid = null; save(); connect(); },
   pickProfile(d) { S.ui.profile = d.id; render(); },
   async join() { const j = await run('join', { first: v('first'), name: v('bizname'), profileId: v('profile') }); if (j) { S.pid = j.pid; save(); render(); } },
-  leave() { S.role = null; S.code = null; S.pid = null; S.game = null; save(); if (S.es) S.es.close(); render(); },
+  leave() { S.role = null; S.code = null; S.pid = null; S.game = null; save(); disconnect(); render(); },
   pickStyle(d) { S.ui.style = d.id; render(); },
   async setStyle() { const j = await run('style', { style: v('style'), because: v('stylebecause') }); if (j) { S.ui.restyling = false; render(); } },
   restyle() { const p = me(); S.ui.style = p.style; S.ui.stylebecause = p.styleBecause; S.ui.restyling = true; render(); },
@@ -529,7 +548,7 @@ const ACT = {
   async tRemove(d) { if (confirm('Remove this business?')) await run('t_remove', { pid: d.id }); },
   tCopy() { copyResults(); },
   tPrintAll() { printPlayers(ranked()); },
-  tNew() { if (confirm('Start a brand-new game with a new code? This game stays open until you close the page.')) { S.game = null; S.code = null; if (S.es) S.es.close(); save(); render(); } },
+  tNew() { if (confirm('Start a brand-new game with a new code? This game stays open until you close the page.')) { S.game = null; S.code = null; disconnect(); save(); render(); } },
 };
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
