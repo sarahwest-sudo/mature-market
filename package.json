@@ -1,0 +1,13 @@
+{
+  "name": "mature-market",
+  "version": "1.0.0",
+  "description": "Mature Market: an online classroom business game (IA1 human resource practice).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "sim": "node sim.js 300"
+  },
+  "engines": { "node": ">=18" },
+  "license": "UNLICENSED",
+  "private": true
+}

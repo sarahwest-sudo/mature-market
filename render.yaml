@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: mature-market
+    runtime: node
+    plan: free
+    buildCommand: "echo no build needed"
+    startCommand: node server.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: TEACHER_PIN
+        sync: false
