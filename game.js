@@ -90,7 +90,7 @@ function marketValue(g, p) { return Math.max(5, Math.round(p.revenue * 0.25 + p.
 function newGame(code, pin) {
   return {
     code, pin, created: Date.now(), phase: 'lobby', round: 0, paused: false,
-    timer: { endsAt: Date.now() + PHASE_SECONDS.lobby * 1000, remaining: null, total: PHASE_SECONDS.lobby },
+    timer: { endsAt: null, remaining: PHASE_SECONDS.lobby * 1000, total: PHASE_SECONDS.lobby, started: false },
     market: { size: 0, growth: 0.015, baseRate: 0.06, saturatedUntil: 0 },
     mods: { visaUntil: 0, trainHalf: 0, automateHalf: 0 },
     players: {}, order: [], deals: [], contracts: [], approvals: [], feed: [],

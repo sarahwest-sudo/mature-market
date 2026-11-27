@@ -84,9 +84,9 @@ const prof = (p) => S.meta.profiles.find((x) => x.id === p.profileId);
 const styleLabel = (s) => (S.meta.styles[s] ? S.meta.styles[s].label : 'Not chosen');
 const ev = (id) => S.meta.events.find((e) => e.id === id);
 const factor = (t) => (['Maturity challenge', 'Market interaction'].includes(t) ? t : 'STEEPLE factor: ' + t);
-function timeLeft() { const g = S.game; if (!g || !g.timer) return 0; return g.paused ? g.timer.remaining || 0 : g.timer.endsAt - (Date.now() + S.offset); }
+function timeLeft() { const g = S.game; if (!g || !g.timer) return 0; return g.paused || !g.timer.started ? g.timer.remaining || 0 : g.timer.endsAt - (Date.now() + S.offset); }
 function fmtT(ms) { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
-function tick() { const ms = timeLeft(); document.querySelectorAll('.timer').forEach((el) => { el.textContent = S.game && S.game.phase === 'over' ? 'Done' : S.game && S.game.paused ? 'Paused ' + fmtT(ms) : (ms <= 0 ? "Time's up" : fmtT(ms)); el.classList.toggle('late', ms <= 0 && S.game && S.game.phase !== 'over'); }); }
+function tick() { const ms = timeLeft(); document.querySelectorAll('.timer').forEach((el) => { el.textContent = S.game && S.game.phase === 'over' ? 'Done' : S.game && S.game.paused ? 'Paused ' + fmtT(ms) : S.game && S.game.timer && !S.game.timer.started ? fmtT(ms) + ' (not started)' : (ms <= 0 ? "Time's up" : fmtT(ms)); el.classList.toggle('late', ms <= 0 && S.game && S.game.phase !== 'over'); }); }
 setInterval(tick, 500);
 
 function spark(vals, good) {
@@ -365,6 +365,7 @@ function teacherView() {
   let h = `<div class="bar"><div class="row"><span class="muted">Game code</span><span class="code">${esc(g.code)}</span><span class="muted small">Students go to ${esc(location.host)}</span></div>
   <div class="row"><b>Round ${g.round}/${g.totalRounds} · ${PHASE_NAMES[g.phase]}</b><span class="bigtimer"><span class="timer"></span></span></div></div><div class="wrap">`;
   h += `<div class="row" style="margin-bottom:10px"><button class="primary big" data-act="tNext" ${g.phase === 'over' ? 'disabled' : ''}>${nextLabel(g)}</button>
+  <button class="primary" data-act="tStart" ${g.timer && g.timer.started || g.phase === 'over' ? 'disabled' : ''}>${g.timer && g.timer.started ? 'Timer running' : 'Start timer'}</button>
   <button data-act="tPause">${g.paused ? 'Resume' : 'Pause'}</button><button data-act="tTime">+30 seconds</button>
   <button data-act="tUndo" ${g.round ? '' : 'disabled'}>Undo last round</button><button class="danger" data-act="tEnd" ${g.phase === 'over' ? 'disabled' : ''}>End game</button>
   <button data-act="tCopy">Copy all results</button><button data-act="tPrintAll" ${ps.length ? '' : 'disabled'}>Print all reflections</button>
@@ -517,6 +518,7 @@ const ACT = {
   async create() { const pin = String(v('newpin')).trim(); try { const j = await api('create', { pin }); S.code = j.code; S.pin = pin; S.role = 'teacher'; save(); connect(); } catch (e) { toast(e.message, true); } },
   async tlogin() { const code = String(v('tcode')).trim().toUpperCase(); const pin = String(v('tpin')).trim(); try { await api('tlogin', { code, pin }); S.code = code; S.pin = pin; save(); connect(); } catch (e) { toast(e.message, true); } },
   async tNext() { if (S.game.phase === 'debrief' && S.game.round >= S.game.totalRounds && !confirm('Show the final results and end the game?')) return; await run('t_next'); },
+  async tStart() { await run('t_start'); },
   async tPause() { await run('t_pause'); },
   async tTime() { await run('t_time', { seconds: 30 }); },
   async tUndo() { if (confirm(`Undo round ${S.game.round}? Every business goes back to how it was before this round's event card.`)) await run('t_undo'); },

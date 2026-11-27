@@ -107,7 +107,7 @@ function makeCode() {
 function getGame(code) { const g = games.get(String(code || '').toUpperCase()); if (!g) throw new Error('No game with that code. Check the code on the projector.'); return g; }
 function teacher(b) { const g = getGame(b.code); if (String(b.pin) !== g.pin) throw new Error('Wrong teacher PIN.'); return g; }
 function player(b) { const g = getGame(b.code); const p = g.players[b.pid]; if (!p) throw new Error('Player not found. Join again.'); return { g, p }; }
-function setTimer(g, phase) { const s = G.PHASE_SECONDS[phase] || 0; g.timer = { endsAt: Date.now() + s * 1000, remaining: null, total: s }; }
+function setTimer(g, phase) { const s = G.PHASE_SECONDS[phase] || 0; g.timer = { endsAt: null, remaining: s * 1000, total: s, started: false }; }
 function notPaused(g) { if (g.paused) throw new Error('The game is paused.'); }
 
 // ---------- commands ----------
@@ -142,13 +142,21 @@ const cmds = {
     setTimer(g, g.phase);
     return {};
   },
-  t_pause(b) {
+  t_start(b) {
     const g = teacher(b);
-    if (!g.paused) { g.paused = true; g.timer.remaining = Math.max(0, g.timer.endsAt - Date.now()); }
-    else { g.paused = false; g.timer.endsAt = Date.now() + (g.timer.remaining || 0); g.timer.remaining = null; }
+    if (g.timer.started) throw new Error('The timer is already running.');
+    g.timer.started = true;
+    if (!g.paused) { g.timer.endsAt = Date.now() + (g.timer.remaining || 0); g.timer.remaining = null; }
     return {};
   },
-  t_time(b) { const g = teacher(b); const s = Number(b.seconds) || 30; if (g.paused) g.timer.remaining = Math.max(0, (g.timer.remaining || 0) + s * 1000); else g.timer.endsAt = Math.max(Date.now(), g.timer.endsAt) + s * 1000; return {}; },
+  t_pause(b) {
+    const g = teacher(b);
+    const running = g.timer.started;
+    if (!g.paused) { g.paused = true; if (running) g.timer.remaining = Math.max(0, g.timer.endsAt - Date.now()); }
+    else { g.paused = false; if (running) { g.timer.endsAt = Date.now() + (g.timer.remaining || 0); g.timer.remaining = null; } }
+    return {};
+  },
+  t_time(b) { const g = teacher(b); const s = Number(b.seconds) || 30; if (g.paused || !g.timer.started) g.timer.remaining = Math.max(0, (g.timer.remaining || 0) + s * 1000); else g.timer.endsAt = Math.max(Date.now(), g.timer.endsAt) + s * 1000; return {}; },
   t_undo(b) {
     const g = teacher(b);
     const s = snaps.get(g.code); const snap = s && s[g.round];
