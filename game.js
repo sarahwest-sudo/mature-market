@@ -489,27 +489,50 @@ function acceptDeal(g, p, d) {
 }
 
 // ---------- SWOT ----------
+// Every fact tile quotes figures the student can see in their own data table (round 0 to now),
+// and a tile is only included when its category is clear from those figures. Flat indicators are left out.
+const SWOT_INDICATORS = [
+  // key, label, formatter, +1 = higher is better / -1 = lower is better, smallest change that counts
+  ['turnover', 'Staff turnover', (v) => v + '%', -1, 0.5],
+  ['sat', 'Staff satisfaction', (v) => v + '/10', 1, 0.2],
+  ['productivity', 'Labour productivity', (v) => '$' + v + 'k per employee', 1, 1],
+  ['absent', 'Absenteeism', (v) => v + '%', -1, 0.2],
+  ['cpe', 'Cost per employee', (v) => '$' + v + 'k', -1, 0.5],
+  ['share', 'Market share', (v) => v + '%', 1, 0.2],
+];
+// A SWOT needs at least one round of results, so there is a change over time to analyse.
+function canSwot(p) { return p.history.length >= 2; }
 function makeSwot(g, p) {
-  const h = p.history; const s = h[0]; const c = h[h.length - 1]; const pv = h.length > 2 ? h[h.length - 3] : s;
-  const tiles = [];
-  const add = (text, key) => tiles.push({ id: uid(), text, key });
-  const span = h.length > 2 ? 'in two rounds' : 'since the start';
-  add(`Staff turnover ${c.turnover <= pv.turnover ? 'fell' : 'rose'} from ${pv.turnover}% to ${c.turnover}% ${span}`, c.turnover <= pv.turnover ? 'S' : 'W');
-  add(`Staff satisfaction is ${c.sat}/10 (started at ${s.sat})`, c.sat >= 6 ? 'S' : 'W');
-  add(`Labour productivity is $${c.productivity}k revenue per employee (started at $${s.productivity}k)`, c.productivity >= s.productivity ? 'S' : 'W');
-  add(`Absenteeism is ${c.absent}% (started at ${s.absent}%)`, c.absent <= s.absent ? 'S' : 'W');
-  add(`Cost per employee is $${c.cpe}k (started at $${s.cpe}k)`, c.cpe <= s.cpe ? 'S' : 'W');
-  add('The home market grows only about 2% a round, but new markets add revenue outside it', 'O');
-  const rivals = list(g).filter((x) => x.id !== p.id);
-  const unhappy = rivals.filter((x) => x.sat < 6);
-  if (unhappy.length) add(`${unhappy.length} rival(s) have staff satisfaction below 6/10, so their skilled staff could be poached`, 'O');
-  if (g.drawn.includes('subsidy') || g.drawn.includes('ai')) add('New technology and government support make upskilling cheaper', 'O');
-  const best = rivals.sort((a, b) => b.share - a.share)[0];
-  if (best) add(`${best.name} holds the biggest market share (${r1(best.share * 100)}%) and competes for the same shoppers`, 'T');
-  if (g.drawn.includes('rival') || g.drawn.includes('saturation')) add('Overseas rivals and market saturation are squeezing the home market', 'T');
-  else add('Rivals with higher staff satisfaction can poach your staff in a talent war', 'T');
-  if (c.debt > 15) add(`Debt is $${c.debt}m, so rising interest rates would increase costs`, 'T');
-  return tiles.slice(0, 8).sort(() => Math.random() - 0.5);
+  const h = p.history; const s = h[0]; const c = h[h.length - 1]; const now = c.round;
+  const internal = []; const external = [];
+  const add = (arr, text, key) => arr.push({ id: uid(), text, key });
+  const rivals = list(g).filter((x) => x.id !== p.id && x.history.length);
+  const rowOf = (x) => x.history[x.history.length - 1];
+  const avg = (k) => r1(rivals.reduce((a, x) => a + rowOf(x)[k], 0) / (rivals.length || 1));
+  for (const [k, label, f, dir, min] of SWOT_INDICATORS) {
+    const d = c[k] - s[k];
+    if (Math.abs(d) >= min) {
+      add(internal, `${label} ${d > 0 ? 'rose' : 'fell'} from ${f(s[k])} in round 0 to ${f(c[k])} in round ${now}`, d * dir > 0 ? 'S' : 'W');
+    } else if (rivals.length && Math.abs(c[k] - avg(k)) >= min * 2) {
+      add(internal, `${label} is ${f(c[k])} in round ${now}; your rivals average ${f(avg(k))}`, (c[k] - avg(k)) * dir > 0 ? 'S' : 'W');
+    }
+  }
+  add(external, `The home market grows only about ${r1(g.market.growth * 100)}% a round, but new markets (overseas, online) can add revenue outside it`, 'O');
+  const unhappy = rivals.filter((x) => rowOf(x).sat < 6 && rowOf(x).sat < c.sat);
+  if (unhappy.length) add(external, `${unhappy.length} rival${unhappy.length > 1 ? 's have' : ' has'} staff satisfaction below 6/10 and below yours, so their skilled staff could be recruited`, 'O');
+  if (g.drawn.includes('subsidy') || g.drawn.includes('ai')) add(external, 'New technology and government support make upskilling staff cheaper', 'O');
+  const happier = rivals.filter((x) => rowOf(x).sat > c.sat);
+  if (happier.length) add(external, `${happier.length} rival${happier.length > 1 ? 's have' : ' has'} higher staff satisfaction than your ${c.sat}/10, so they could poach your staff`, 'T');
+  const best = [...rivals].sort((a, b) => rowOf(b).share - rowOf(a).share)[0];
+  if (best && rowOf(best).share >= c.share) add(external, `${best.name} holds ${rowOf(best).share}% of the market (you hold ${c.share}%) and competes for the same shoppers`, 'T');
+  if (g.drawn.includes('rival') || g.drawn.includes('saturation')) add(external, 'Overseas rivals and market saturation are squeezing the home market', 'T');
+  if (c.debt > 15) add(external, `Your debt is $${c.debt}m, so a rise in interest rates would increase your costs`, 'T');
+  if (!external.some((t) => t.key === 'T')) add(external, 'In a mature market rivals fight for the same shoppers, so any slip in service or price can cost you market share', 'T');
+  // Keep at most 8 tiles: up to 5 internal facts, always at least one opportunity and one threat.
+  const firstO = external.find((t) => t.key === 'O'); const firstT = external.find((t) => t.key === 'T');
+  const ext = [firstO, firstT, ...external.filter((t) => t !== firstO && t !== firstT)];
+  const inn = internal.slice(0, 5);
+  return [...inn, ...ext.slice(0, 8 - inn.length)].sort(() => Math.random() - 0.5);
 }
 
 // ---------- scoring ----------
@@ -548,5 +571,5 @@ function publicState(g, extra = {}) {
 module.exports = {
   TOTAL_ROUNDS, PHASES, PHASE_SECONDS, PROFILES, STYLES, ACTIONS, EVENTS, DEAL_TYPES, STEEPLE,
   newGame, addPlayer, setStyle, startGame, drawEvent, resolve, validateDecision, costOf, sendDeal, acceptDeal,
-  makeSwot, scores, publicState, list, debt, marketValue, eventOf, actionOf, factorLabel, autoBoardScore, uid,
+  makeSwot, canSwot, scores, publicState, list, debt, marketValue, eventOf, actionOf, factorLabel, autoBoardScore, uid,
 };

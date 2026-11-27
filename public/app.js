@@ -8,7 +8,7 @@ const PHASE_NAMES = { lobby: 'Joining', event: 'Event', check: 'Check your busin
 const PLAYER_TIPS = {
   lobby: 'Pick your leadership style and write one sentence on why it suits your business. Then wait for your teacher to start round 1.',
   event: 'Read the event card. Which factor is it? Think about how it changes your staffing. Its effect has already been applied.',
-  check: 'Read your dashboard. What changed since last round, and why? You can commission a SWOT now (your first one is free).',
+  check: 'Read your dashboard. What changed since last round, and why? From round 2 you can commission a SWOT (your first one is free).',
   deal: 'Send, accept, counter or reject deals. Negotiate out loud with the classmate. You can accept only ONE deal this round.',
   decide: 'Choose ONE main action and write your board report: name the action and give a business reason linked to your data. It only locks in once your "because" is written.',
   resolve: 'Watch the projector. Every action is applied at the same time. Check your new status badge.',
@@ -18,7 +18,7 @@ const PLAYER_TIPS = {
 const RUN_SHEET = {
   lobby: ['Put this screen on the projector. Students go to the same link on their laptops and type the game code.', 'Each student types their first name, names their business and picks an industry profile (each profile once; more than 12 students: play in pairs).', 'Students choose a leadership style and write one "because". Watch the list fill up below.', 'Optional: choose the round 1 event card below (round 1 always draws a mild card).', 'Press Start round 1 when everyone has joined (about 8 minutes).'],
   event: ['Read the card aloud. Ask: which STEEPLE factor is this?', 'Ask the card\'s human resource question and let two students answer.', 'Press Next when ready (about 1 minute).'],
-  check: ['Students read their dashboards and compare with last round.', 'Remind them a SWOT costs $1m after the first free one and earns an insight token if sound.', 'Press Next to open the deal window (about 1 minute).'],
+  check: ['Students read their dashboards and compare with last round.', 'From round 2, remind them they can commission a SWOT: the first is free, then $1m each. A sound SWOT earns an insight token.', 'Press Next to open the deal window (about 1 minute).'],
   deal: ['Deal window open: students send, accept, counter or reject offers and negotiate out loud.', 'Each business can accept only one deal this round. Watch the deal feed.', 'Press Next to close deals (about 3 minutes). Unanswered offers expire.'],
   decide: ['Students pick ONE main action and write a one-sentence "because" board report.', 'Check the count of locked-in decisions below. A subsidiary may be waiting for its parent\'s yes.', 'Press Resolve when the timer ends (about 2 minutes). Anyone not locked in takes no action.'],
   resolve: ['The game has applied every action. Watch the share bars move and the new badges.', 'Point out any red flags (emergency loans) and takeover targets.', 'Press Next for the debrief (about 1 minute).'],
@@ -329,29 +329,33 @@ function dataTable(hist) {
 
 function swotCard(p) {
   const g = S.game; const sw = p.swot;
-  const canAsk = ['check', 'deal'].includes(g.phase) && !g.paused;
-  const ask = `<button class="primary" data-act="swot" ${canAsk ? '' : 'disabled'}>Commission a SWOT (${p.swotsUsed ? '$1m' : 'free'})</button>`;
+  const ready = p.history.length >= 2;
+  const canAsk = ready && ['check', 'deal'].includes(g.phase) && !g.paused;
+  const ask = ready
+    ? `<button class="primary" data-act="swot" ${canAsk ? '' : 'disabled'}>Commission a ${sw ? 'new ' : ''}SWOT (${p.swotsUsed ? '$1m' : 'free'})</button>${canAsk ? '' : '<span class="small muted"> Opens in the Check and Deal phases.</span>'}`
+    : '<p class="small muted">Your first SWOT opens in round 2, once you have a round of results to compare.</p>';
   const intro = '<p class="small">A SWOT (strengths, weaknesses, opportunities, threats) consultant report sorts your own human resource data. A sound answer earns an insight token: your next action gets a 10% better result.</p>';
   if (!sw) return `<div class="card"><h2>SWOT on request</h2>${intro}${ask}</div>`;
-  if (sw.checking) return `<div class="card"><h2>SWOT</h2><p>Checking your SWOT…</p></div>`;
+  if (sw.checking) return `<div class="card"><h2>SWOT</h2><p>Checking your SWOT… (this takes a few seconds)</p></div>`;
   if (sw.result) {
     const st = sw.result.status;
     return `<div class="card"><h2>SWOT result</h2><p>${st === 'passed' ? '<span class="badge growth">Sound: insight token earned</span>' : st === 'pending' ? '<span class="badge stagnation">Waiting for your teacher</span>' : '<span class="badge decline">Not yet</span>'}</p>
     <p class="small">${sw.correct}/${sw.total} tiles match the consultant's sort. ${esc(sw.result.feedback)}</p>
     ${sw.key ? `<details><summary class="small">See the consultant's sort</summary><ul class="small">${sw.tiles.map((t) => `<li>${esc(t.text)}: <b>${{ S: 'Strength', W: 'Weakness', O: 'Opportunity', T: 'Threat' }[sw.key[t.id]]}</b>${sw.sort[t.id] === sw.key[t.id] ? ' ✓' : ` (you: ${{ S: 'Strength', W: 'Weakness', O: 'Opportunity', T: 'Threat' }[sw.sort[t.id]]})`}</li>`).join('')}</ul></details>` : ''}
-    ${ask}</div>`;
+    ${st === 'not yet' && !sw.retried ? '<p class="small"><b>Fix it for free:</b> your tiles and sentences are kept so you can change them.</p><button class="primary" data-act="swotRetry">Try again (free)</button> ' : ''}${st === 'pending' ? '' : ask}</div>`;
   }
   const sortKey = 'swot_' + sw.tiles.map((t) => t.id).join('');
   const sort = S.ui[sortKey] || (S.ui[sortKey] = {});
   const tile = (t) => `<div class="tile" draggable="true" data-tile="${t.id}">${esc(t.text)}<div class="tb">${['S', 'W', 'O', 'T'].map((c) => `<button data-act="sortTile" data-id="${t.id}" data-c="${c}" title="${c}" ${sort[t.id] === c ? 'class="primary"' : ''}>${c}</button>`).join('')}</div></div>`;
   const box = (c, name) => `<div class="box ${c}" data-drop="${c}"><h4>${name}</h4>${sw.tiles.filter((t) => sort[t.id] === c).map(tile).join('')}</div>`;
   const unsorted = sw.tiles.filter((t) => !sort[t.id]);
-  return `<div class="card"><h2>Consultant report</h2>${intro}<details open><summary>Your human resource data</summary>${dataTable(p.history)}</details>
-  <h3 style="margin-top:10px">Sort the fact tiles</h3><p class="small muted">Drag each tile into a box, or tap S, W, O or T.</p>
+  return `<div class="card"><h2>Consultant report</h2>${intro}<details open><summary>Your human resource data (every fact below comes from this table)</summary>${dataTable(p.history)}</details>
+  <h3 style="margin-top:10px">1. Sort the fact tiles (${sw.tiles.length - unsorted.length}/${sw.tiles.length} sorted)</h3><p class="small muted">Tap S, W, O or T on each tile, or drag it into a box. Strengths and weaknesses are inside your business; opportunities and threats come from outside it.</p>
   <div class="box" data-drop="">${unsorted.length ? unsorted.map(tile).join('') : '<span class="small muted">All tiles sorted.</span>'}</div>
   <div class="swot">${box('S', 'Strengths')}${box('W', 'Weaknesses')}${box('O', 'Opportunities')}${box('T', 'Threats')}</div>
-  <label for="f_rel">*** Identify one relationship in your data (how one indicator affects another)</label>${ta('rel', 'maxlength="400" placeholder="When satisfaction fell, turnover rose…"')}
-  <label for="f_trend">*** Identify one trend in your data (a change over time)</label>${ta('trend', 'maxlength="400" placeholder="Labour productivity rose from … to … over … rounds"')}
+  <h3 style="margin-top:10px">2. Write one relationship and one trend</h3>
+  <label for="f_rel">Relationship: how one indicator moved with another (one sentence)</label>${ta('rel', 'maxlength="400" placeholder="For example: as staff satisfaction rose, staff turnover fell."')}
+  <label for="f_trend">Trend: how one indicator changed over the rounds, with numbers from your table (one sentence)</label>${ta('trend', 'maxlength="400" placeholder="For example: labour productivity rose from $100k in round 0 to $104k in round 2."')}
   <button class="primary" data-act="swotSubmit" style="margin-top:8px">Submit my SWOT</button></div>`;
 }
 
@@ -548,7 +552,16 @@ const ACT = {
   async approve(d) { await run('approve', { approvalId: d.id, yes: d.yes === '1' }); },
   async swot() { const j = await run('swot_request'); if (j) { S.ui.rel = ''; S.ui.trend = ''; } },
   sortTile(d) { const sw = me().swot; const key = 'swot_' + sw.tiles.map((t) => t.id).join(''); const s = S.ui[key] || (S.ui[key] = {}); s[d.id] = s[d.id] === d.c ? undefined : d.c; render(); },
-  async swotSubmit() { const sw = me().swot; const key = 'swot_' + sw.tiles.map((t) => t.id).join(''); await run('swot_submit', { sort: S.ui[key] || {}, relationship: v('rel'), trend: v('trend') }); },
+  async swotSubmit() {
+    const sw = me().swot; const key = 'swot_' + sw.tiles.map((t) => t.id).join(''); const sort = S.ui[key] || {};
+    const left = sw.tiles.filter((t) => !sort[t.id]).length;
+    if (left) return toast(`Sort every tile first: ${left} still to place.`, true);
+    const words = (x) => String(x).trim().split(/\s+/).filter(Boolean).length;
+    if (words(v('rel')) < 3) return toast('Write your relationship as a short sentence.', true);
+    if (words(v('trend')) < 3) return toast('Write your trend as a short sentence.', true);
+    await run('swot_submit', { sort, relationship: v('rel'), trend: v('trend') });
+  },
+  async swotRetry() { await run('swot_retry'); },
   printMe() { printPlayers([me()]); },
   // teacher
   async create() { const pin = String(v('newpin')).trim(); try { const j = await api('create', { pin }); S.code = j.code; S.pin = pin; S.role = 'teacher'; save(); connect(); } catch (e) { toast(e.message, true); } },

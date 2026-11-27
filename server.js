@@ -80,17 +80,23 @@ Reply with JSON only: {"scores":[{"id":"...","score":0}]}`;
 async function checkSwot(g, p, sub, correct, total) {
   const key = swotKeys.get(`${g.code}:${p.id}`) || {};
   const tiles = p.swot.tiles.map((t) => ({ text: t.text, studentPut: sub.sort[t.id] || 'unsorted', consultantKey: key[t.id] }));
+  const cols = ['round', 'turnover', 'sat', 'productivity', 'absent', 'cpe', 'share', 'revenue', 'profit', 'staff'];
+  const table = p.history.map((r) => cols.map((k) => `${k}=${r[k]}`).join(', ')).join('\n');
   const prompt = `You check a Year 11 Business student's SWOT analysis of their own human resource data in a classroom game.
-Their data by round (round 0 is the start): ${JSON.stringify(p.history)}
-Their tile sort (${correct}/${total} match the consultant key; a different placement can still be reasonable if justified by the data): ${JSON.stringify(tiles)}
+Units: turnover and absenteeism in %, sat = staff satisfaction out of 10, productivity = $k revenue per employee, cpe = cost per employee in $k, share = market share %, revenue and profit in $m.
+Their data by round (round 0 is the start):
+${table}
+Their tile sort (${correct}/${total} match the consultant key; a different placement is fine if it is reasonable): ${JSON.stringify(tiles)}
 Relationship they identified: "${sub.relationship}"
 Trend they identified: "${sub.trend}"
-A sound answer: the sort is mostly reasonable, the relationship links two indicators (e.g. satisfaction and turnover) and the trend describes a change over time using the data.
+Mark it sound when: at least ${Math.ceil(total * 0.6)} tiles are placed reasonably, the relationship links two indicators (e.g. as satisfaction rose, turnover fell), and the trend describes a change over time in one indicator that matches the direction in their data. Exact numbers are not required. Be encouraging and fair to a 16-year-old; only mark it not yet if a part is missing, off-topic or contradicts the data.
+If it is not yet sound, say exactly which part to fix.
 Reply with JSON only: {"sound":true,"feedback":"one or two short sentences of feedback written to the student"}`;
   try {
     const out = await askClaude(prompt, 400);
-    p.swot.result = { status: out.sound ? 'passed' : 'not yet', feedback: String(out.feedback || '').slice(0, 400), by: 'claude' };
-    if (out.sound) p.insight = true;
+    const sound = out.sound === true || out.sound === 'true';
+    p.swot.result = { status: sound ? 'passed' : 'not yet', feedback: String(out.feedback || '').slice(0, 400), by: 'claude' };
+    if (sound) p.insight = true;
   } catch (e) {
     p.swot.result = { status: 'pending', feedback: 'Your teacher will check this on the teacher screen.', by: 'teacher' };
     g.swotPending.push(p.id);
@@ -172,8 +178,9 @@ const cmds = {
   t_pick(b) { const g = teacher(b); g.nextPick = b.eventId === 'random' || g.deck.includes(b.eventId) ? b.eventId : 'random'; return {}; },
   t_swot(b) {
     const g = teacher(b); const p = g.players[b.pid]; if (!p || !p.swot) throw new Error('No SWOT to check.');
+    if (!g.swotPending.includes(p.id)) throw new Error('That SWOT has already been checked.');
     g.swotPending = g.swotPending.filter((x) => x !== p.id);
-    p.swot.result = { status: b.approve ? 'passed' : 'not yet', feedback: b.approve ? 'Approved by your teacher.' : 'Not yet: your teacher wants a clearer relationship or trend.', by: 'teacher' };
+    p.swot.result = { status: b.approve ? 'passed' : 'not yet', feedback: b.approve ? 'Approved by your teacher.' : 'Not yet: your teacher wants a clearer relationship or trend. Use numbers from your data table.', by: 'teacher' };
     if (b.approve) p.insight = true;
     return {};
   },
@@ -234,7 +241,9 @@ const cmds = {
   swot_request(b) {
     const { g, p } = player(b); notPaused(g);
     if (!['check', 'deal'].includes(g.phase)) throw new Error('Commission a SWOT in the Check or Deal phase.');
-    if (p.swot && p.swot.round === g.round && !p.swot.result) throw new Error('Finish your current SWOT first.');
+    if (!G.canSwot(p)) throw new Error('Your first SWOT opens in round 2, once you have a round of results to compare.');
+    if (p.swot && !p.swot.result) throw new Error('Finish your current SWOT first.');
+    if (p.swot && p.swot.result.status === 'pending') throw new Error('Wait for your teacher to check your last SWOT.');
     const cost = p.swotsUsed === 0 ? 0 : 1;
     p.cash -= cost; p.swotsUsed += 1;
     const tiles = G.makeSwot(g, p);
@@ -242,18 +251,30 @@ const cmds = {
     p.swot = { round: g.round, tiles: tiles.map(({ id, text }) => ({ id, text })), result: null };
     return {};
   },
+  swot_retry(b) {
+    const { p } = player(b);
+    const sw = p.swot;
+    if (!sw || !sw.result || sw.result.status !== 'not yet') throw new Error('There is no SWOT to try again.');
+    if (sw.retried) throw new Error('You have already had your free second try. Commission a new SWOT.');
+    sw.retried = true; sw.result = null; delete sw.key; delete sw.sort; delete sw.correct;
+    return {};
+  },
   swot_submit(b) {
     const { g, p } = player(b);
     if (!p.swot || p.swot.result) throw new Error('No open SWOT.');
+    if (p.swot.checking) throw new Error('Your SWOT is already being checked.');
     const sort = b.sort || {}; const rel = String(b.relationship || '').trim(); const tr = String(b.trend || '').trim();
-    if (p.swot.tiles.some((t) => !['S', 'W', 'O', 'T'].includes(sort[t.id]))) throw new Error('Sort every tile into Strengths, Weaknesses, Opportunities or Threats.');
-    if (rel.split(/\s+/).length < 4 || tr.split(/\s+/).length < 4) throw new Error('Write one relationship and one trend (a sentence each).');
+    const left = p.swot.tiles.filter((t) => !['S', 'W', 'O', 'T'].includes(sort[t.id])).length;
+    if (left) throw new Error(`Sort every tile: ${left} still to place in Strengths, Weaknesses, Opportunities or Threats.`);
+    const words = (x) => x.split(/\s+/).filter(Boolean).length;
+    if (words(rel) < 3) throw new Error('Write your relationship as a short sentence (at least 3 words).');
+    if (words(tr) < 3) throw new Error('Write your trend as a short sentence (at least 3 words).');
     const key = swotKeys.get(`${g.code}:${p.id}`) || {};
     const correct = p.swot.tiles.filter((t) => key[t.id] === sort[t.id]).length;
     p.swot.sort = sort; p.swot.relationship = rel.slice(0, 400); p.swot.trend = tr.slice(0, 400);
     p.swot.correct = correct; p.swot.total = p.swot.tiles.length;
     p.swot.key = key;
-    if (claudeOn()) { p.swot.result = null; p.swot.checking = true; checkSwot(g, p, p.swot, correct, p.swot.total).finally(() => { p.swot.checking = false; broadcast(g); }); }
+    if (claudeOn()) { p.swot.checking = true; checkSwot(g, p, p.swot, correct, p.swot.total).finally(() => { p.swot.checking = false; broadcast(g); }); }
     else { p.swot.result = { status: 'pending', feedback: 'Your teacher will check this on the teacher screen.', by: 'teacher' }; g.swotPending.push(p.id); }
     return {};
   },
