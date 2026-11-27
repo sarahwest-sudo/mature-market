@@ -126,8 +126,7 @@ function landing() {
   return `<div class="wrap" style="max-width:560px"><h1 style="margin-top:20px">Mature Market</h1>
   <p class="muted">A business game about the maturity stage: run your own business for 6 rounds, trade with classmates and grow, stagnate or decline.</p>
   <div class="card"><h2>Join a game</h2><label for="f_joincode">Game code (on the projector)</label>
-  <div class="row">${inp('joincode', 'placeholder="ABCD" maxlength="4" autocapitalize="characters" style="text-transform:uppercase;width:140px;font-size:1.3rem"')}<button class="primary" data-act="goJoin">Continue</button></div></div>
-  <p class="small"><a href="?teacher">Teacher screen</a></p></div>`;
+  <div class="row">${inp('joincode', 'placeholder="ABCD" maxlength="4" autocapitalize="characters" style="text-transform:uppercase;width:140px;font-size:1.3rem"')}<button class="primary" data-act="goJoin">Continue</button></div></div></div>`;
 }
 
 function joinView() {
